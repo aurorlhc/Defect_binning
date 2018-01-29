@@ -1,10 +1,10 @@
-import sys
+import sys, shutil
 import cv2
 import os, os.path
-from matplotlib import pyplot as plt
+#from matplotlib import pyplot as plt
 import numpy as np 
 from scipy import signal
-import shutil
+from skimage import measure
 
 
 def move_image(imagepath, newpath):
@@ -26,14 +26,40 @@ def read_images(imageDir):
 
 	for file in os.listdir(imageDir):
 		extension = os.path.splitext(file)[1]
+		#print(os.path.splitext(file)[0])
 		if extension.lower() not in valid_image_extensions:
 			continue
+		elif os.path.splitext(file)[0] == 'reference':
+			reference_image = os.path.join(imageDir, file)
+			continue
+
 		image_path_list.append(os.path.join(imageDir, file))
 	
-	return image_path_list
+	return image_path_list, reference_image
 
+def learn_info(reference):
+	ref = cv2.imread(reference, 0)
+	ref_resize = cv2.resize(ref, (480,480))
+	blur = cv2.GaussianBlur(ref_resize,(5,5),0)	
+	ret,thresh = cv2.threshold(blur,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)  #Otsu's thresholding
+	
+	#label every stripe
+	thresh_label = measure.label(thresh, background=0)
 
-def Image_Processing_and_Binning(image_path_list, imageDir):
+	#measure line width in pixels
+	vertical_line = thresh_label[:,240]
+	p_num = 0 #count total pixels for white line
+	for i in range(0, 480):
+		if vertical_line[i] != 0:
+			p_num += 1
+	tot_line = np.max(vertical_line) #largest value in the line is the total number of lines
+
+	line_width = int(p_num/tot_line) #average line width in pixels
+	line_dist = int((480-p_num)/tot_line)
+
+	return line_width, line_dist
+
+def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist):
 	#loop through image_path_list to read in each image
 	for imagePath in image_path_list:
 		#print(imagePath)
@@ -47,11 +73,11 @@ def Image_Processing_and_Binning(image_path_list, imageDir):
 			width, height = raw_image.shape
 
 			#pixel size in nm
-			pixel = FOV/width
+			#pixel = FOV/width
 
 			# line width and line distance in # of pixels
-			line_width = int(Width/pixel)
-			line_dist = int(Dist/pixel)
+			#line_width = int(Width/pixel)
+			#line_dist = int(Dist/pixel)
 
 			# "I" filter to detect break and bridge
 			line2 = np.ones(shape=(2*line_dist+line_width,1))
@@ -90,13 +116,14 @@ if __name__ == '__main__':
 	imageDir = input("Enter the image directory:")
 
 	## Image info
-	FOV = float(input("Enter FOV in nm:"))
-	Width = float(input("Enter line width in nm (integer):"))
-	Dist = float(input("Enter line distance in nm (interger)"))
+	#FOV = float(input("Enter FOV in nm:"))
+	#Width = float(input("Enter line width in nm (integer):"))
+	#Dist = float(input("Enter line distance in nm (interger)"))
 
-	image_path_list = read_images(imageDir)
+	image_path_list, reference_image = read_images(imageDir)
 	#print(image_path_list)
-	Image_Processing_and_Binning(image_path_list, imageDir)
+	line_width, line_dist = learn_info(reference_image)
+	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist)
 
 	print ("Total number of images processed:", len(image_path_list)) #print # of images processed in this code
 
