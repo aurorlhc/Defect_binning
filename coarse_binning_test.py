@@ -3,8 +3,9 @@ import cv2
 import os, os.path
 #from matplotlib import pyplot as plt
 import numpy as np 
-from scipy import signal
-from skimage import measure
+from scipy import signal, ndimage
+import time
+#from skimage import measure
 
 
 def move_image(imagepath, newpath):
@@ -21,7 +22,7 @@ def read_images(imageDir):
 	#image path and valid extensions
 	#imageDir = '../EUV_images/code_test'
 	image_path_list = []
-	valid_image_extensions = ['.jpeg'] #['.jpg','.png','.tiff','.tif'] identify the image type that want to work with
+	valid_image_extensions = ['.jpeg','.jpg','.png','.tiff','.tif'] #identify the image type that want to work with
 	valid_iamge_extensions = [item.lower() for item in valid_image_extensions]
 
 	for file in os.listdir(imageDir):
@@ -37,29 +38,55 @@ def read_images(imageDir):
 	
 	return image_path_list, reference_image
 
-def learn_info(reference):
+
+#learn parameters from reference image
+def learn_info(reference, image_height, image_width):
 	ref = cv2.imread(reference, 0)
-	ref_resize = cv2.resize(ref, (480,480))
-	blur = cv2.GaussianBlur(ref_resize,(5,5),0)	
+	ref_resize = cv2.resize(ref, (image_height, image_width))
+
+	for i in range(380, 420):
+		for j in range(100, 380):
+			ref_resize[i][j] = ref_resize[i][0]
+
+	blur = cv2.GaussianBlur(ref_resize,(3,3),0)	
 	ret,thresh = cv2.threshold(blur,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)  #Otsu's thresholding
 	
 	#label every stripe
-	thresh_label = measure.label(thresh, background=0)
+	#thresh_label = measure.label(thresh, background=0)
+	thresh_img, thresh_label = ndimage.label(thresh)
 
 	#measure line width in pixels
-	vertical_line = thresh_label[:,240]
+	vertical_line = thresh_img[:,240]
 	p_num = 0 #count total pixels for white line
-	for i in range(0, 480):
+	for i in range(0, image_width):
 		if vertical_line[i] != 0:
 			p_num += 1
 	tot_line = np.max(vertical_line) #largest value in the line is the total number of lines
 
-	line_width = int(p_num/tot_line) #average line width in pixels
-	line_dist = int((480-p_num)/tot_line)
+	line_width = p_num/tot_line #average line width in pixels
+	line_dist = (image_width-p_num)/tot_line
 
-	return line_width, line_dist
+	if line_width - int(line_width) > 0.5:
+		line_width = int(line_width) + 1
+	else:
+		line_width = int(line_width)
+	
+	if line_dist - int(line_dist) > 0.5:
+		line_dist = int(line_dist) + 1
+	else:
+		line_dist = int(line_dist)
 
-def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist):
+
+	# "I" filter to detect break and bridge
+	line2 = np.ones(shape=(2*line_dist+line_width,1))
+	#loop over the image to find defect:
+	f = signal.convolve2d(thresh, line2, 'valid')
+
+	return line_width, line_dist, np.min(f), np.max(f)
+
+
+#processing all the images in sequence
+def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, image_height, image_width, image_min, image_max):
 	#loop through image_path_list to read in each image
 	for imagePath in image_path_list:
 		#print(imagePath)
@@ -69,8 +96,13 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 		#if there is no defect, put the original image into "good image" folder
 		#if there is defect, put the original image into "bad image" folder
 		if image is not None:
-			raw_image = cv2.resize(image, (480,480)) #reduce image size for faster loop over
+			raw_image = cv2.resize(image, (image_height, image_width)) #reduce image size for faster loop over
 			width, height = raw_image.shape
+
+			#clear scale bar
+			for i in range(380, 420):
+				for j in range(100, 380):
+					raw_image[i][j] = raw_image[i][0]
 
 			#pixel size in nm
 			#pixel = FOV/width
@@ -83,7 +115,7 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 			line2 = np.ones(shape=(2*line_dist+line_width,1))
 
 			#ret,thresh1 = cv2.threshold(image,128,255,cv2.THRESH_BINARY) #binary threshold
-			blur = cv2.GaussianBlur(raw_image,(5,5),0)	
+			blur = cv2.GaussianBlur(raw_image,(3,3),0)	
 			ret3,thresh3 = cv2.threshold(raw_image,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)  #Otsu's thresholding
 
 			#loop over the image to find defect:
@@ -94,13 +126,13 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 			#save image into different folder
 			######
 			#try to use the difference between max, min, mean, median (np.)
-			if np.min(f) > line_width/3 and np.max(f) < 2*line_dist + 0.5*line_width: #good image
+			if np.min(f) >= image_min and np.max(f) <= image_max: #good image
 				path3 = imageDir + '/good/' 
 				move_image(imagePath, path3)
-			elif np.min(f) <= line_width/3: #break
+			elif np.min(f) < image_min: #break
 				path1 = imageDir + '/break/' 
 				move_image(imagePath, path1)
-			elif np.max(f) >= 2*line_dist + 0.5*line_width: #bridge
+			elif np.max(f) > image_max: #bridge
 				path2 = imageDir + '/bridge/' 
 				move_image(imagePath, path2)
 
@@ -120,16 +152,19 @@ if __name__ == '__main__':
 	#Width = float(input("Enter line width in nm (integer):"))
 	#Dist = float(input("Enter line distance in nm (interger)"))
 
+
+	#monitoring executing time
+	start_time = time.time()
+
+	#learning parameters from reference image
 	image_path_list, reference_image = read_images(imageDir)
 	#print(image_path_list)
-	line_width, line_dist = learn_info(reference_image)
-	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist)
+	img_height, img_width = 480, 480
+	line_width, line_dist, img_min, img_max = learn_info(reference_image, img_height, img_width)
 
-	print ("Total number of images processed:", len(image_path_list)) #print # of images processed in this code
+	#print(img_min, img_max)
 
+	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, img_height, img_width, img_min, img_max)
 
-
-
-
-
-
+	print("Total number of images processed: ", len(image_path_list)) #print # of images processed in this code
+	print("Total running time is: %.3f seconds." % (time.time() - start_time))
