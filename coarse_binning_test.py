@@ -1,10 +1,14 @@
-import sys, shutil
+import shutil
 import cv2
 import os, os.path
-#from matplotlib import pyplot as plt
 import numpy as np 
 from scipy import signal, ndimage
 import time
+
+from tkinter import Tk
+from tkinter.filedialog import askdirectory
+
+#from matplotlib import pyplot as plt
 #from skimage import measure
 
 
@@ -82,7 +86,7 @@ def learn_info(reference, image_height, image_width):
 	#loop over the image to find defect:
 	f = signal.convolve2d(thresh, line2, 'valid')
 
-	return line_width, line_dist, np.min(f), np.max(f)
+	return line_width, line_dist, int(np.min(f)), int(np.max(f)+1)
 
 
 #processing all the images in sequence
@@ -93,8 +97,9 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 		image = cv2.imread(imagePath, 0) #0 for grayscale
 
 		#binarize the image first and then do analysis to find defect in the image
-		#if there is no defect, put the original image into "good image" folder
-		#if there is defect, put the original image into "bad image" folder
+		#if there is no defect, put the original image into "good" folder
+		#if there is break defect, put the original image into "break" folder
+		#if there is bridge defect, put the original image into "bridge" folder
 		if image is not None:
 			raw_image = cv2.resize(image, (image_height, image_width)) #reduce image size for faster loop over
 			width, height = raw_image.shape
@@ -116,25 +121,29 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 
 			#ret,thresh1 = cv2.threshold(image,128,255,cv2.THRESH_BINARY) #binary threshold
 			blur = cv2.GaussianBlur(raw_image,(3,3),0)	
-			ret3,thresh3 = cv2.threshold(raw_image,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)  #Otsu's thresholding
+			ret3,thresh3 = cv2.threshold(blur,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)  #Otsu's thresholding
 
 			#loop over the image to find defect:
 			f = signal.convolve2d(thresh3, line2, 'valid') #2d convolution of filter on image to get activation value
 			
 			#print(np.max(f), np.min(f), np.mean(f), np.median(f))
-
+			curr_min, curr_max = int(np.min(f)), int(np.max(f))
+			#print(curr_min, curr_max)
 			#save image into different folder
 			######
 			#try to use the difference between max, min, mean, median (np.)
-			if np.min(f) >= image_min and np.max(f) <= image_max: #good image
+			if curr_min >= image_min and curr_max <= image_max: #good image
 				path3 = imageDir + '/good/' 
 				move_image(imagePath, path3)
-			elif np.min(f) < image_min: #break
-				path1 = imageDir + '/break/' 
-				move_image(imagePath, path1)
-			elif np.max(f) > image_max: #bridge
+			
+			elif curr_max > image_max: #bridge
 				path2 = imageDir + '/bridge/' 
 				move_image(imagePath, path2)
+
+			else:
+				#np.min(f) < image_min: #break
+				path1 = imageDir + '/break/' 
+				move_image(imagePath, path1)
 
 		elif image is None:
 			print("Error loading: " + imagePath)
@@ -144,8 +153,12 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 
 if __name__ == '__main__':
 
-	#still need to type in the directory, need to figure out a better way to do this
-	imageDir = input("Enter the image directory:")
+	#Manually type in the directory path, can do copy and paste
+	#imageDir = input("Enter the image directory:")
+
+	Tk().withdraw() # no need to open the tkinter GUI, so keep the root window from appearing
+	imageDir = askdirectory() # open an Windows window to select the working directory
+
 
 	## Image info
 	#FOV = float(input("Enter FOV in nm:"))
@@ -154,17 +167,21 @@ if __name__ == '__main__':
 
 
 	#monitoring executing time
-	start_time = time.time()
+	tot_time = time.time()
 
 	#learning parameters from reference image
 	image_path_list, reference_image = read_images(imageDir)
 	#print(image_path_list)
 	img_height, img_width = 480, 480
+
+	#info_learning_time = time.time()
 	line_width, line_dist, img_min, img_max = learn_info(reference_image, img_height, img_width)
+	#print("Learning info time is: %.3f seconds." % (time.time() - info_learning_time))  0.062s
+	#print(line_width, line_dist, img_min, img_max)
 
-	#print(img_min, img_max)
-
+	#img_process_time = time.time()
 	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, img_height, img_width, img_min, img_max)
+	#print("Image processing time is %.3f seconds." % (time.time() - img_process_time))  0.047s/image
 
 	print("Total number of images processed: ", len(image_path_list)) #print # of images processed in this code
-	print("Total running time is: %.3f seconds." % (time.time() - start_time))
+	print("Total running time is: %.3f seconds." % (time.time() - tot_time))
