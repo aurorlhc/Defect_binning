@@ -4,7 +4,6 @@ import os, os.path
 import numpy as np 
 from scipy import signal, ndimage
 import time
-
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
 
@@ -68,7 +67,7 @@ def learn_info(reference, image_height, image_width):
 	tot_line = np.max(vertical_line) #largest value in the line is the total number of lines
 
 	line_width = p_num/tot_line #average line width in pixels
-	line_dist = (image_width-p_num)/tot_line
+	line_dist = (image_width-p_num)/tot_line #average line distance in pixels
 
 	if line_width - int(line_width) > 0.5:
 		line_width = int(line_width) + 1
@@ -86,7 +85,7 @@ def learn_info(reference, image_height, image_width):
 	#loop over the image to find defect:
 	f = signal.convolve2d(thresh, line2, 'valid')
 
-	return line_width, line_dist, int(np.min(f)), int(np.max(f)+1)
+	return line_width, line_dist, int(np.min(f)), int(np.max(f))
 
 
 #processing all the images in sequence
@@ -104,11 +103,12 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 			raw_image = cv2.resize(image, (image_height, image_width)) #reduce image size for faster loop over
 			width, height = raw_image.shape
 
+			
 			#clear scale bar
 			for i in range(380, 420):
 				for j in range(100, 380):
 					raw_image[i][j] = raw_image[i][0]
-
+			
 			#pixel size in nm
 			#pixel = FOV/width
 
@@ -124,13 +124,13 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 			ret3,thresh3 = cv2.threshold(blur,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)  #Otsu's thresholding
 
 			#loop over the image to find defect:
-			f = signal.convolve2d(thresh3, line2, 'valid') #2d convolution of filter on image to get activation value
+			f = signal.convolve2d(thresh3, line2, 'valid') #2d convolution of filter on image to get activation map
 			
 			#print(np.max(f), np.min(f), np.mean(f), np.median(f))
 			curr_min, curr_max = int(np.min(f)), int(np.max(f))
 			#print(curr_min, curr_max)
+
 			#save image into different folder
-			######
 			#try to use the difference between max, min, mean, median (np.)
 			if curr_min >= image_min and curr_max <= image_max: #good image
 				path3 = imageDir + '/good/' 
@@ -160,7 +160,7 @@ if __name__ == '__main__':
 	imageDir = askdirectory() # open an Windows window to select the working directory
 
 
-	## Image info
+	## Manually type in the image info
 	#FOV = float(input("Enter FOV in nm:"))
 	#Width = float(input("Enter line width in nm (integer):"))
 	#Dist = float(input("Enter line distance in nm (interger)"))
@@ -179,8 +179,16 @@ if __name__ == '__main__':
 	#print("Learning info time is: %.3f seconds." % (time.time() - info_learning_time))  0.062s
 	#print(line_width, line_dist, img_min, img_max)
 
+	#allow 5% flucuation in activation map for min and 10% for max
+	#min has small number, small fluctuation will have large impact
+	#max has large number, can tolerate more fluctuation
+	filter_length = line_width + 2*line_dist #length of the filter
+	ref_max = img_max + filter_length*0.1
+	ref_min = img_min - filter_length*0.05
+	#print(ref_max, ref_min)
+
 	#img_process_time = time.time()
-	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, img_height, img_width, img_min, img_max)
+	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, img_height, img_width, ref_min, ref_max)
 	#print("Image processing time is %.3f seconds." % (time.time() - img_process_time))  0.047s/image
 
 	print("Total number of images processed: ", len(image_path_list)) #print # of images processed in this code
