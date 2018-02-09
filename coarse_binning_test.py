@@ -1,15 +1,22 @@
+######################################################################
+#### SEM images auto classification (Coarse Binning), Version 0.1 ####
+####          Author: Hechao Li, Lam Research Corporation         ####
+####          Email: Hechao.Li@lamresearch.com                    ####
+######################################################################
+
+
 import shutil
 import cv2
 import os, os.path
 import numpy as np 
 from scipy import signal, ndimage
 import time
+#from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askdirectory
 
 #from matplotlib import pyplot as plt
 #from skimage import measure
-
 
 def move_image(imagepath, newpath):
 	os.makedirs(os.path.dirname(newpath), exist_ok=True)
@@ -158,7 +165,6 @@ if __name__ == '__main__':
 
 	Tk().withdraw() # no need to open the tkinter GUI, so keep the root window from appearing
 	imageDir = askdirectory() # open an Windows window to select the working directory
-
 
 	## Manually type in the image info
 	#FOV = float(input("Enter FOV in nm:"))
