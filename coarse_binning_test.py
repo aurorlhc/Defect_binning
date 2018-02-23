@@ -95,8 +95,34 @@ def learn_info(reference, image_height, image_width):
 	return line_width, line_dist, int(np.min(f)), int(np.max(f))
 
 
+def break_quantification(f, image_height, image_width):
+	[row,col] = np.where(f<=2)
+	#row = np.where(f1<=1)[0]
+	#col = np.where(f1<=1)[1]
+	test = np.zeros((image_height, image_width))
+
+	for i in range(len(row)):
+		test[row[i]][col[i]] = 1
+
+	test_img, test_label = ndimage.label(test)
+	count = [0]*test_label
+
+	for i in range(image_height):
+		record = [0]*test_label
+		for j in range(image_width):
+			if test_img[i][j] != 0:
+				record[test_img[i][j]-1] += 1
+		for k in range(test_label):
+			count[k] = max(count[k], record[k])
+
+	return count
+
+
 #processing all the images in sequence
-def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, image_height, image_width, image_min, image_max):
+def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, image_height, image_width, image_min, image_max, scale_bar):
+	#open a text file to write result for breaks
+	file = open("break_info.txt", "w")
+
 	#loop through image_path_list to read in each image
 	for imagePath in image_path_list:
 		#print(imagePath)
@@ -112,7 +138,7 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 
 			
 			#clear scale bar
-			for i in range(380, 420):
+			for i in range(380, 410):
 				for j in range(100, 380):
 					raw_image[i][j] = raw_image[i][0]
 			
@@ -149,13 +175,21 @@ def Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dis
 
 			else:
 				#np.min(f) < image_min: #break
-				path1 = imageDir + '/break/' 
+				path1 = imageDir + '/break/'
+				break_info = break_quantification(f, image_height, image_width)
+				imagename = os.path.basename(imagePath)
+				file.write("Image name: %s\n" % (imagename))
+				for item in range(len(break_info)):
+					file.write("break No. %d, pixel size is %d, real size is %.3f nm\n" % (item+1, break_info[item], break_info[item]*1000/scale_bar))
+				file.write("\n\n")
 				move_image(imagePath, path1)
 
 		elif image is None:
 			print("Error loading: " + imagePath)
 			#end this loop iteration and move on to next image
 			continue
+
+	file.close()
 
 
 if __name__ == '__main__':
@@ -180,10 +214,13 @@ if __name__ == '__main__':
 	#print(image_path_list)
 	img_height, img_width = 480, 480
 
+	#in the current case, scale bar is 240 pixels in length for 1 um.
+	scale_bar = 240
+
 	#info_learning_time = time.time()
 	line_width, line_dist, img_min, img_max = learn_info(reference_image, img_height, img_width)
 	#print("Learning info time is: %.3f seconds." % (time.time() - info_learning_time))  0.062s
-	#print(line_width, line_dist, img_min, img_max)
+	print(line_width, line_dist, img_min, img_max)
 
 	#allow 5% flucuation in activation map for min and 10% for max
 	#min has small number, small fluctuation will have large impact
@@ -194,7 +231,7 @@ if __name__ == '__main__':
 	#print(ref_max, ref_min)
 
 	#img_process_time = time.time()
-	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, img_height, img_width, ref_min, ref_max)
+	Image_Processing_and_Binning(image_path_list, imageDir, line_width, line_dist, img_height, img_width, ref_min, ref_max, scale_bar)
 	#print("Image processing time is %.3f seconds." % (time.time() - img_process_time))  0.047s/image
 
 	print("Total number of images processed: ", len(image_path_list)) #print # of images processed in this code
